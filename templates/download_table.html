@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download Table</title>
+  {{ bootstrap.load_css() }}
+  <script src="https://cdn.jsdelivr.net/gh/linways/table-to-excel@v1.0.4/dist/tableToExcel.js"></script>
+  <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+  <script>
+    const db = new Dexie("Records")
+
+    db.version(1).stores({
+      rows: `
+        &artikelcode,
+        productcode,
+        gtin,
+        verpakkingsvorm,
+        gebruikseenheden,
+        artikelomschrijving,
+        bruto,
+        korting,
+        gebruikseenheid
+      `
+    })
+  </script>
+</head>
+
+<body>
+  <a href="/">Home Page</a>
+  <div class="container">
+    <button id="btnExport" onclick="exportReportToExcel(this)">EXPORT TABLE</button>
+    <input id="inSaveName" type="text">
+    <button id="btnSave" onclick="saveTableToServer(this)">SAVE TABLE</button>
+    <select name="loadSave" id="loadSave" onchange="loadPresetToTable(this)"></select>
+    <button id="btnDelete" itemid="deleteSave" onclick="deleteCurrentSelectedSave(this)">DELETE SAVE</button>
+    <table class="table table-hover" id="download-table">
+      <thead class="thead-dark">
+        <tr data-exclude="true">
+          <th scope="col" class="th-Artikelnummer">Artikelnummer</th>
+          <th scope="col" class="th-EAN_code">EAN Code</th>
+          <th scope="col" class="th-Verpakkingsvorm">Verpakkingsvorm</th>
+          <th scope="col" class="th-Inhoud">Inhoud</th>
+          <th scope="col" class="th-Artikelomschrijving">Artikelomschrijving</th>
+          <th scope="col" class="th-Inkoopprijs">Inkoopprijs</th>
+          <th scope="col" class="th-Korting">Korting</th>
+          <th scope="col" class="th-Prijs_Per">Prijs Per</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr data-exclude="false" class="visually-hidden">
+          <td>Artikelnummer</td>
+          <td>EAN Code</td>
+          <td>Verpakkingsvorm</td>
+          <td>Inhoud</td>
+          <td>Artikelomschrijving</td>
+          <td>Inkoopprijs</td>
+          <td>Korting</td>
+          <td>Prijs Per</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const table = document.getElementById('table-body')
+    let nameList = []
+    let tableCopy = document.getElementsByTagName('table')[0].cloneNode(true)
+    tableCopy.id = 'copyTable'
+    let tbodyCopy = tableCopy.children[1]
+
+    async function deleteCurrentSelectedSave() {
+      const select = document.getElementById('loadSave')
+      const saveName = select.options[select.selectedIndex].text
+
+      if (nameList.includes(saveName) == true && saveName != 'selected') {
+        await fetch(`/v1/delete-save/${saveName}`, {
+            method: 'DELETE'
+          })
+          .then((respone) => {
+            return respone.json()
+          })
+          .then((data) => {
+            fillOptions()
+            loadPresetToTable(document.getElementById('loadSave'))
+            return alert(`\"${saveName}\" Successfully deleted`)
+          })
+          .catch((err) => {
+            console.error(err)
+          })
+      }
+    }
+
+    function insertRow(row) {
+      const columns = [
+        'productcode',
+        'gtin',
+        'verpakkingsvorm',
+        'gebruikseenheden',
+        'artikelomschrijving',
+        'bruto',
+        'korting',
+        'gebruikseenheid'
+      ]
+      const tr = document.createElement('tr')
+
+      tr.id = row.artikelcode
+      tr.className = row.artikelcode
+      tr.dataset.exclude = false
+
+      columns.forEach((col) => {
+        const td = document.createElement('td')
+        td.classList.add(col)
+        td.innerText = row[col]
+        tr.appendChild(td)
+      })
+      //   console.log(table)
+      table.appendChild(tr)
+    }
+
+    async function getAllRows() {
+      await db.rows.each((row) => {
+        // console.log(row)
+        insertRow(row)
+      })
+      tableCopy = document.getElementsByTagName('table')[0].cloneNode(true)
+      tableCopy.id = 'copyTable'
+      tbodyCopy = tableCopy.children[1]
+    }
+
+    function dclickHandler(row) {
+      return () => {
+        if (row.dataset.exclude == 'true') {
+          row.dataset.exclude = false
+          row.classList.remove('table-danger')
+        } else {
+          row.dataset.exclude = true
+          row.classList.add('table-danger')
+        }
+
+        const copyRow = tbodyCopy.getElementsByClassName(row.id)[0]
+        copyRow.dataset.exclude = row.dataset.exclude
+      }
+    }
+
+    function dchangeHandler(row) {
+      return () => {
+        const select = row.cells[6].getElementsByTagName('select')[0]
+        const korting = select.options[select.selectedIndex].text
+
+        const copyRow = tbodyCopy.getElementsByClassName(row.id)[0]
+        copyRow.cells[6].innerHTML = ''
+        copyRow.cells[6].innerText = korting
+      }
+    }
+
+
+    function clickHandler(row) {
+      return async () => {
+        await db.rows.get({
+          artikelcode: row.id
+        }).
+        then(async (el) => {
+          if (el) {
+            row.dataset.exclude = true
+            row.classList.add('table-danger')
+            await db.rows.where({
+              artikelcode: row.id
+            }).delete()
+          } else {
+            row.dataset.exclude = false
+            row.classList.remove('table-danger')
+
+            await db.rows.add({
+              artikelcode: row.id,
+              productcode: row.cells[0].innerText,
+              gtin: row.cells[1].innerText,
+              verpakkingsvorm: row.cells[2].innerText,
+              gebruikseenheden: row.cells[3].innerText,
+              artikelomschrijving: row.cells[4].innerText,
+              bruto: row.cells[5].innerText,
+              korting: row.cells[6].innerText,
+              gebruikseenheid: row.cells[7].innerText
+            })
+          }
+        })
+      }
+    }
+
+    function exportReportToExcel() {
+      // let table = document.getElementsByTagName("table"); // you can use document.getElementById('tableId') as well by providing id to the table tag
+      TableToExcel.convert(tableCopy, { // html code may contain multiple tables so here we are refering to 1st table tag
+        name: `export.xlsx`, // fileName you could use any name
+        sheet: {
+          name: 'Sheet 1' // sheetName
+        }
+      });
+    }
+  </script>
+  <script>
+    function saveTableToServer() {
+      const table = document.getElementById('table-body')
+      const rows = table.getElementsByTagName('tr')
+
+      const select = document.getElementById('loadSave')
+      const selectName = select.options[select.selectedIndex].text
+
+      if (selectName != 'selected') {
+        return alert(`Need to be on tab \"${selectName}\" to save to preset`)
+      }
+
+
+      const artikelcodeArray = []
+      for (let id = 0; id < rows.length; id++) {
+        const element = rows[id];
+        artikelcodeArray.push(element.id)
+      }
+
+      const saveName = document.getElementById('inSaveName').value
+      if (nameList.includes(saveName) == true || saveName == 'selected') {
+        console.log(saveName)
+        return alert(`\"${saveName}\" already exist`)
+      }
+
+      fetch('/v1/create-save', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: saveName,
+            artikelcodes: artikelcodeArray,
+          }),
+          headers: {
+            "Content-type": "application/json; charset-UTF-8"
+          }
+        })
+        .then((response) => response.json())
+        .then((json) => console.log(json));
+
+      fillOptions()
+    }
+  </script>
+  <script>
+    function selectedData() {
+      table.innerHTML = ''
+      getAllRows().then(() => {
+        const rows = table.getElementsByTagName('tr')
+
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i]
+          row.onclick = clickHandler(row)
+        }
+      })
+    }
+
+
+
+    async function loadPresetToTable(option) {
+      const value = option.selectedOptions[0].value
+
+      table.innerHTML = ''
+      if (value == 'selected') {
+        selectedData()
+      } else {
+        const respone = await fetch(`/v1/get-save/${value}`)
+        const data = await respone.json()
+
+        data['data'].forEach((item) => {
+          const tr = document.createElement('tr')
+
+          tr.id = item.artikelcode_leverancier
+          tr.className = item.artikelcode_leverancier
+
+          const tdArtikelnummer = document.createElement('td')
+          tdArtikelnummer.classList.add('productcode')
+          tdArtikelnummer.innerText = item.productcode_fabricant
+          tr.appendChild(tdArtikelnummer)
+
+          const tdEAN = document.createElement('td')
+          tdEAN.classList.add('gtin')
+          tdEAN.innerText = item.gtin
+          tr.appendChild(tdEAN)
+
+          const tdVerpakking = document.createElement('td')
+          tdVerpakking.classList.add('verpakkingsvorm')
+          tdVerpakking.innerText = item.code_verpakkingsvorm
+          tr.appendChild(tdVerpakking)
+
+
+          const tdInhoud = document.createElement('td')
+          tdInhoud.classList.add('gebruikseenheden')
+          tdInhoud.innerText = item.aantal_gebruikseenheden
+          tr.appendChild(tdInhoud)
+
+          const tdOmschrijving = document.createElement('td')
+          tdOmschrijving.classList.add('artikelomschrijving')
+          tdOmschrijving.innerText = item.artikelomschrijving
+          tr.appendChild(tdOmschrijving)
+
+          const tdPrijs = document.createElement('td')
+          tdPrijs.classList.add('bruto')
+          tdPrijs.innerText = item.bruto_prijs
+          tr.appendChild(tdPrijs)
+
+          const tdKorting = document.createElement('td')
+          tdKorting.classList.add('select-korting')
+          tdKorting.name = 'korting'
+          const selectPrijs = document.createElement('select')
+          item.korting.forEach((opt) => {
+            if (opt.korting !== null) {
+              const option = document.createElement('option')
+              option.classList.add('option-korting')
+              option.value = opt.type
+              option.innerText = opt.korting.korting / 100
+              selectPrijs.appendChild(option)
+            }
+          })
+          const option = document.createElement('option')
+          option.classList.add('option-korting')
+          option.value = 'None'
+          option.innerText = 0
+          selectPrijs.appendChild(option)
+          tdKorting.appendChild(selectPrijs)
+          tr.appendChild(tdKorting)
+
+          const tdEenheid = document.createElement('td')
+          tdEenheid.classList.add('gebruikseenheid')
+          tdEenheid.innerText = item.gebruikseenheid
+          tr.appendChild(tdEenheid)
+
+          tr.dataset.exclude = false
+          tr.cells[0].onclick = dclickHandler(tr)
+          tr.cells[6].onchange = dchangeHandler(tr)
+          table.appendChild(tr)
+        })
+      }
+      tableCopy = document.getElementsByTagName('table')[0].cloneNode(true)
+      tableCopy.id = 'copyTable'
+      tbodyCopy = tableCopy.children[1]
+      let rows = tbodyCopy.getElementsByTagName('tr')
+      for (let id = 0; id < rows.length; id++) {
+        const row = rows[id];
+        const select = row.cells[6].getElementsByTagName('select')[0]
+        const korting = select.options[select.selectedIndex].text
+
+        const copyRow = tbodyCopy.getElementsByClassName(row.id)[0]
+        copyRow.cells[6].innerHTML = ''
+        copyRow.cells[6].innerText = korting
+      }
+    }
+
+    async function fillOptions() {
+      const select = document.getElementById('loadSave')
+      select.innerHTML = ''
+
+      const option = document.createElement('option')
+      option.value = 'selected'
+      option.text = 'selected'
+      select.appendChild(option)
+
+      const respone = await fetch('/v1/get-save')
+      const data = await respone.json()
+      nameList = data['name_list']
+
+      nameList.forEach((name) => {
+        const option = document.createElement('option')
+        option.value = name
+        option.text = name
+        select.appendChild(option)
+      })
+    }
+
+    fillOptions()
+    loadPresetToTable(document.getElementById('loadSave'))
+  </script>
+</body>
+
+</html>

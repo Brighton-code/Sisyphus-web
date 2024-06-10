@@ -1,0 +1,201 @@
+{% from 'macros.jinja' import render_pagination %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home Page</title>
+  {{ bootstrap.load_css() }}
+  <style>
+    *,
+    body {
+      margin: 0px;
+      padding: 0px;
+    }
+
+    .productcode_fabricant,
+    .bruto_prijs,
+    .select-korting {
+      text-align: right;
+    }
+
+    .bruto_prijs::before {
+      content: '€';
+      float: left;
+    }
+  </style>
+
+  <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+  <script>
+    const db = new Dexie("Records")
+
+    db.version(1).stores({
+      rows: `
+        &artikelcode,
+        productcode,
+        gtin,
+        verpakkingsvorm,
+        gebruikseenheden,
+        artikelomschrijving,
+        bruto,
+        korting,
+        gebruikseenheid
+      `
+    })
+  </script>
+</head>
+
+<body>
+  <a href="/download-table">Download Selected</a>
+  <div class="container">
+    {{ render_pagination(pagination, 'home', params) }}
+    <table class="table table-hover" id="main">
+      <thead class="thead-dark">
+        <tr>
+          <th scope="col" class="th-Artikelnummer">Artikelnummer <input name="artikelnummer" type="search" spellcheck="false" onkeydown="search()"></th>
+          <th scope="col" class="th-EAN_code">EAN Code</th>
+          <th scope="col" class="th-Verpakkingsvorm">Verpakkingsvorm</th>
+          <th scope="col" class="th-Inhoud">Inhoud</th>
+          <th scope="col" class="th-Artikelomschrijving">Artikelomschrijving <input name="artikelomschrijving" type="search" spellcheck="false" onkeydown="search()"></th>
+          <th scope="col" class="th-Inkoopprijs">Inkoopprijs</th>
+          <th scope="col" class="th-Korting">Korting (%)</th>
+          <th scope="col" class="th-Prijs_Per">Prijs Per</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        {% for row in data %}
+        <tr id={{ row.artikelcode_leverancier }}>
+          <td class="productcode_fabricant">{{row.productcode_fabricant}}</td>
+          <td class="gtin">{{row.gtin}}</td>
+          <td class="code_verpakkingsvorm">{{row.code_verpakkingsvorm}}</td>
+          <td class="aantal_gebruikseenheden">{{row.aantal_gebruikseenheden}}</td>
+          <td class="artikelomschrijving">{{row.artikelomschrijving}}</td>
+          <td class="bruto_prijs">{{row.bruto_prijs}}</td>
+          <td class="korting">
+            <select name="korting" class="select-korting">
+              {% for korting in row.korting %}
+              {% if korting.korting != None %}
+              <option class="option-korting" value="{{ korting.type }}">
+                {{ korting.korting.korting/100 }}
+              </option>
+              {% endif %}
+              {% endfor %}
+              <option value="None">0</option>
+            </select>
+          </td>
+          <td id="gebruikseenheid">{{row.gebruikseenheid}}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    async function showSelectedRow(row) {
+      await db.rows.get({
+        artikelcode: row.id
+      }).then((el) => {
+        if (el) {
+          const select = row.cells[6].getElementsByTagName('select')[0]
+          const korting = select.options[select.selectedIndex].text
+
+          row.classList.add('table-primary')
+
+          for (let i = 0; i < select.options.length; i++) {
+            const option = select.options[i];
+            if (el.korting == option.text) {
+              select.selectedIndex = i
+            }
+          }
+        } else {
+          row.classList.remove('table-primary')
+        }
+      })
+    }
+
+    function clickHandler(row) {
+      return async () => {
+        await db.rows.get({
+          artikelcode: row.id
+        }).then(async (el) => {
+          if (el) {
+            await db.rows.where({
+              artikelcode: row.id
+            }).delete()
+          } else {
+            const select = row.cells[6].getElementsByTagName('select')[0]
+            const selectText = select.options[select.selectedIndex].text
+
+            // Add korting type
+            await db.rows.add({
+              artikelcode: row.id,
+              productcode: row.cells[0].innerText,
+              gtin: row.cells[1].innerText,
+              verpakkingsvorm: row.cells[2].innerText,
+              gebruikseenheden: row.cells[3].innerText,
+              artikelomschrijving: row.cells[4].innerText,
+              bruto: row.cells[5].innerText,
+              korting: selectText,
+              gebruikseenheid: row.cells[7].innerText
+            })
+          }
+        })
+        await showSelectedRow(row)
+      }
+    }
+
+    function changeHandler(row) {
+      return async () => {
+        await db.rows.get({
+          artikelcode: row.id
+        }).
+        then(async (el) => {
+          const select = row.cells[6].getElementsByTagName('select')[0]
+          const korting = select.options[select.selectedIndex].text
+
+          if (el && el.korting != korting) {
+            await db.rows.update(row.id, {
+              korting: korting
+            })
+          }
+        })
+      }
+    }
+
+
+    function search() {
+      if (event.key == 'Enter') {
+        const artikelnummer = document.getElementsByName('artikelnummer')[0].value
+        const artikelomschrijving = document.getElementsByName('artikelomschrijving')[0].value
+        const urlParams = new URLSearchParams(location.search)
+        urlParams.set('page', 1)
+        urlParams.set('artikelnummer', encodeURIComponent(artikelnummer))
+        urlParams.set('omschrijving', encodeURIComponent(artikelomschrijving))
+
+        const searchParams = urlParams.toString()
+
+        const a = document.createElement('a')
+        a.href = '/?' + searchParams
+        a.click()
+      }
+    }
+
+    const tbody = document.getElementById('table-body')
+    const rows = tbody.getElementsByTagName('tr')
+
+    for (let i = 0; i < rows.length; i++) {
+      const element = rows[i];
+
+      element.cells[0].onclick = clickHandler(element);
+      element.cells[6].onchange = changeHandler(element)
+      showSelectedRow(element)
+    };
+
+    const urlParams = new URLSearchParams(location.search)
+    document.getElementsByName('artikelnummer')[0].value = urlParams.get('artikelnummer')
+    document.getElementsByName('artikelomschrijving')[0].value = urlParams.get('omschrijving')
+  </script>
+</body>
+
+</html>
